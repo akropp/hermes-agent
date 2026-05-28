@@ -4,6 +4,7 @@ import builtins
 import importlib
 import logging
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -559,6 +560,21 @@ class TestFindHermesMd:
 
 
 
+    def test_permission_error_from_context_candidate_is_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        """Unreadable ancestors do not crash HERMES.md discovery."""
+        real_is_file = Path.is_file
+
+        def permission_denied_for_hermes_files(path):
+            if path.name in {".hermes.md", "HERMES.md"}:
+                raise PermissionError("permission denied")
+            return real_is_file(path)
+
+        monkeypatch.setattr(Path, "is_file", permission_denied_for_hermes_files)
+
+        assert _find_hermes_md(tmp_path) is None
+
 
 class TestFindGitRoot:
     def test_finds_git_dir(self, tmp_path):
@@ -584,6 +600,21 @@ class TestFindGitRoot:
         # If result is not None, it must actually contain .git
         if result is not None:
             assert (result / ".git").exists()
+
+    def test_permission_error_from_git_candidate_is_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        """Unreadable ancestor .git paths do not crash prompt construction."""
+        real_exists = Path.exists
+
+        def permission_denied_for_git(path):
+            if path.name == ".git":
+                raise PermissionError("permission denied")
+            return real_exists(path)
+
+        monkeypatch.setattr(Path, "exists", permission_denied_for_git)
+
+        assert _find_git_root(tmp_path) is None
 
 
 class TestStripYamlFrontmatter:

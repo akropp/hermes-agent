@@ -79,15 +79,40 @@ def _scan_context_content(content: str, filename: str) -> str:
     return content
 
 
+def _path_exists(path: Path) -> bool:
+    """Return whether *path* exists without leaking filesystem errors.
+
+    Context discovery runs while building the system prompt. It must be
+    best-effort: unreadable ancestors (for example ``/root`` from a gateway
+    process running as an unprivileged user) should not crash the agent.
+    """
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _path_is_file(path: Path) -> bool:
+    """Return whether *path* is a file without leaking filesystem errors."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _find_git_root(start: Path) -> Optional[Path]:
     """Walk *start* and its parents looking for a ``.git`` directory.
 
     Returns the directory containing ``.git``, or ``None`` if we hit the
-    filesystem root without finding one.
+    filesystem root without finding one. Unreadable ancestors are treated as
+    non-matches so prompt construction remains best-effort.
     """
-    current = start.resolve()
+    try:
+        current = start.resolve()
+    except OSError:
+        return None
     for parent in [current, *current.parents]:
-        if (parent / ".git").exists():
+        if _path_exists(parent / ".git"):
             return parent
     return None
 
@@ -103,7 +128,10 @@ def _find_hermes_md(cwd: Path) -> Optional[Path]:
     ``None`` if nothing is found.
     """
     stop_at = _find_git_root(cwd)
-    current = cwd.resolve()
+    try:
+        current = cwd.resolve()
+    except OSError:
+        return None
 
     # When there is no git root, only check cwd itself – walking parents
     # could pick up a .hermes.md planted in /tmp, /home, etc.
@@ -112,7 +140,7 @@ def _find_hermes_md(cwd: Path) -> Optional[Path]:
     for directory in search_dirs:
         for name in _HERMES_MD_NAMES:
             candidate = directory / name
-            if candidate.is_file():
+            if _path_is_file(candidate):
                 return candidate
         if stop_at and directory == stop_at:
             break
