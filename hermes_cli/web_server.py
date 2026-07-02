@@ -643,6 +643,13 @@ async def _plugin_api_runtime_gate(request: Request, call_next):
 
 @app.middleware("http")
 async def _dashboard_auth_gate(request: Request, call_next):
+    # Allow Bearer SESSION_TOKEN for plugin REST APIs even in gated mode.
+    # This keeps external CLI tools (kanban-cli, Claude Code, etc.) working
+    # after the v0.18.0 OAuth gate refactor.
+    path = request.url.path
+    if path.startswith("/api/plugins/") and _has_valid_session_token(request):
+        request.state.token_authenticated = True
+        return await call_next(request)
     from hermes_cli.dashboard_auth.middleware import gated_auth_middleware
     return await gated_auth_middleware(request, call_next)
 
