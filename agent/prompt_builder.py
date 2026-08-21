@@ -95,7 +95,10 @@ def _scan_context_content(content: str, filename: str) -> str:
 
 def _find_git_root(start: Path) -> Optional[Path]:
     """Nearest ancestor (or *start* itself) containing ``.git``, else None."""
-    current = start.resolve()
+    try:
+        current = start.resolve()
+    except OSError:
+        return None
     # A parent the process may not stat (locked-down /home on shared hosts) is "no .git here", not a crash.
     return next((p for p in (current, *current.parents) if _exists_or_denied(p / ".git")), None)
 
@@ -110,13 +113,26 @@ def _exists_or_denied(path: Path) -> bool:
 def _find_hermes_md(cwd: Path) -> Optional[Path]:
     """Nearest ``.hermes.md`` / ``HERMES.md`` from *cwd* up to the git root, else None."""
     stop_at = _find_git_root(cwd)
-    current = cwd.resolve()
+    try:
+        current = cwd.resolve()
+    except OSError:
+        return None
     # No git root: cwd only — walking parents could pick up a file planted in /tmp, /home, etc.
     for directory in [current, *current.parents] if stop_at else [current]:
-        found = next((directory / n for n in (".hermes.md", "HERMES.md") if (directory / n).is_file()), None)
+        found = next(
+            (directory / n for n in (".hermes.md", "HERMES.md") if _is_file_or_denied(directory / n)),
+            None,
+        )
         if found or directory == stop_at:
             return found
     return None
+
+
+def _is_file_or_denied(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def _strip_yaml_frontmatter(content: str) -> str:
