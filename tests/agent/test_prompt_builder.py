@@ -601,6 +601,18 @@ class TestFindHermesMd:
         monkeypatch.setattr(Path, "exists", _exists)
         assert _find_git_root(project) is None
 
+    def test_permission_denied_context_candidate_is_ignored(self, tmp_path, monkeypatch):
+        """An unreadable context file is treated as absent, not a prompt-build failure."""
+        real_is_file = Path.is_file
+
+        def _is_file(self):
+            if self.name in {".hermes.md", "HERMES.md"}:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_is_file(self)
+
+        monkeypatch.setattr(Path, "is_file", _is_file)
+        assert _find_hermes_md(tmp_path) is None
+
     def test_walks_to_git_root(self, tmp_path):
         (tmp_path / ".git").mkdir()
         (tmp_path / ".hermes.md").write_text("root rules")
