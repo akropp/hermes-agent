@@ -1768,6 +1768,62 @@ class TestGrok43StaleCacheGuard:
             assert ctx == 256_000, f"{slug} should stay 256000, got {ctx}"
 
 
+class TestGrok47Metadata:
+    """grok-4.7 is not in pre-4.7 Hermes catalogs, so it fell through to the
+    generic ``grok-4`` catch-all (256,000) instead of its real 500,000, and it
+    was absent from the effort allowlist even though it accepts
+    ``reasoning.effort`` (verified live against /v1/responses: low and xhigh
+    both HTTP 200). Official card: 500,000 context,
+    docs.x.ai/developers/models/grok-4-7.
+    """
+
+    def test_catalog_resolves_grok_4_7_to_500k_not_catchall(self):
+        from agent.model_metadata import _longest_key_match, DEFAULT_CONTEXT_LENGTHS
+        key, value = _longest_key_match(DEFAULT_CONTEXT_LENGTHS, "grok-4.7")
+        assert key == "grok-4.7"
+        assert value == 500_000
+
+    def test_stale_pre_catalog_cache_entry_for_grok_4_7(self):
+        from agent.model_metadata import _stale_pre_catalog_cache_entry
+        # 256,000 is the old grok-4 catch-all value — stale for grok-4.7 (500K).
+        assert _stale_pre_catalog_cache_entry("grok-4.7", 256_000)
+        assert _stale_pre_catalog_cache_entry("xai/grok-4.7", 256_000)
+        # Correct/probed values are never dropped.
+        assert not _stale_pre_catalog_cache_entry("grok-4.7", 500_000)
+
+    def test_grok_4_7_dropped_and_reresolves_to_500k(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        import importlib
+        import agent.model_metadata as mm
+        importlib.reload(mm)
+        base = "https://api.x.ai/v1"
+        mm.save_context_length("grok-4.7", base, 256_000)
+        ctx = mm.get_model_context_length(
+            "grok-4.7", base_url=base, api_key="", provider="xai"
+        )
+        assert ctx == 500_000
+
+    def test_grok_4_7_is_effort_capable_with_xhigh(self):
+        from agent.model_metadata import (
+            grok_supports_reasoning_effort,
+            grok_supports_xhigh_effort,
+        )
+        assert grok_supports_reasoning_effort("grok-4.7")
+        assert grok_supports_reasoning_effort("xai/grok-4.7")
+        assert grok_supports_xhigh_effort("grok-4.7")
+        # grok-4.5 predates xhigh and must keep topping out at high.
+        assert grok_supports_reasoning_effort("grok-4.5")
+        assert not grok_supports_xhigh_effort("grok-4.5")
+
+    def test_grok_4_7_is_not_in_the_fast_family(self):
+        """/fast and service_tier=priority gating stay 4.6-only: grok-4.7-fast is
+        Cursor/Grok-Build only and is not on the public API."""
+        from agent.model_metadata import is_grok_46_family
+        assert not is_grok_46_family("grok-4.7")
+        assert not is_grok_46_family("grok-4.7-fast")
+        assert is_grok_46_family("grok-4.6")
+
+
 class TestGenericPreCatalogStaleGuard:
     """Generic _stale_pre_catalog_cache_entry guard: models whose catalog
     entry postdates a shorter catch-all (qwen3.6-plus, grok-4-fast,
