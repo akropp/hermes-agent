@@ -220,6 +220,21 @@ RUN set -eu; \
     mkdir -p /etc/hermes; \
     printf '%s' "$browser_bin" > /etc/hermes/agent-browser-executable-path
 
+# Browser credential-vault integration discovers the Bitwarden Password
+# Manager CLI (bw) at runtime. Pin it so image builds remain reproducible.
+# This layer must stay AFTER the pm toolchain block above: pm is what
+# provisions node/npm and symlinks them into /usr/local/bin (the
+# node_source stage this used to follow is gone). npm's global prefix is
+# the pm-owned node store, which is not on PATH, so link bw explicitly
+# instead of assuming the install location is reachable.
+ARG BITWARDEN_CLI_VERSION=2026.9.0
+RUN set -eu; \
+    npm install --global --no-audit --no-fund "@bitwarden/cli@${BITWARDEN_CLI_VERSION}"; \
+    bw_bin="$(npm prefix --global)/bin/bw"; \
+    test -x "$bw_bin"; \
+    ln -sf "$bw_bin" /usr/local/bin/bw; \
+    bw --version
+
 # PM is resident too: never borrow application libraries or create its worker
 # environment under /root (unreachable to the runtime UID).
 RUN python3 -c 'from pathlib import Path; from pm import stage_manager_runtime; from scripts.bundles.payload import seal_pm_runtime; root = Path("/opt/hermes"); python = Path("/usr/local/bin/python3").resolve(); stage_manager_runtime(python=python, destination=root / "pm-runtime", project=root / "pm"); seal_pm_runtime(root, python)'
